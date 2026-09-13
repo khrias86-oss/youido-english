@@ -8,7 +8,7 @@
 - 로컬 상시 실행 또는 GitHub Actions 10분 주기 실행, 무료 호스팅(Render/Koyeb) 모바일 대시보드
 - 계획서: [docs/PLAN.md](docs/PLAN.md)
 
-> **중요**: 이 코드는 사이트 HTML 을 직접 확인하지 못한 환경에서 작성되었습니다(네트워크 정책 차단). 파서는 공공 예약 사이트의 흔한 패턴을 넓게 인식하지만, 처음 실행 시 반드시 아래 **3단계(inspect)** 로 실제 구조를 확인하세요.
+> **참고**: 초기 버전은 사이트 HTML 을 직접 확인하지 못한 환경에서 작성되었으나, 2026-09-13 GitHub Actions 실행에서 실제 사이트(YF260101)에 접속해 달력 표기 방식을 확인하고 파서를 맞췄습니다. 실제 사이트는 "예약가능/마감" 같은 문구 대신 **"N회 개인/공용 잔여인원"** 처럼 회차별 숫자를 나열하는 방식이며(0=마감), 이 형식을 인식하도록 `parsers/common.py` 의 `extract_round_counts()` 가 처리합니다. 다른 시설/사이트는 마크업이 다를 수 있으니, 새 대상을 추가하면 아래 **3단계(inspect)** 로 한 번 확인하는 것을 권장합니다.
 
 ## 1. 설치
 
@@ -105,6 +105,7 @@ umppa-monitor inspect -c config.yaml
    umppa-monitor parse-file artifacts/inspect/.../slot_0_2026-09-20.html --mode slots --date 2026-09-20
    umppa-monitor parse-file artifacts/inspect/.../page_0.html --type program
    ```
+5. `scripts/dump_calendar_cells.py <저장된 html>` 을 실행하면 파서가 후보로 보는 셀의 class/onclick/원문 텍스트를 그대로 출력합니다. `parsed slots` 수가 이상할 때 원인을 빠르게 파악하는 용도입니다 (실제 YF260101 사이트 구조를 확인할 때 이렇게 찾았습니다).
 
 ## 4. 실행
 
