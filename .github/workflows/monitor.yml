@@ -37,6 +37,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 임시 진단 단계: 원인 파악 후 제거 예정
+      - name: Network diagnostics (temporary)
+        continue-on-error: true
+        run: |
+          echo "### DNS ###"
+          getent hosts umppa.seoul.go.kr || true
+          echo "### curl -v (10s connect timeout, 20s max) ###"
+          curl -v --connect-timeout 10 --max-time 20 -o /tmp/resp.html \
+            "https://umppa.seoul.go.kr/icare/user/kidsCafeResve/BD_selectKidsCafeResveCal.do?q_fcltyId=YF260101" \
+            2> /tmp/curl.log; echo "curl exit code: $?"
+          echo "### curl stderr (headers/timing) ###"
+          cat /tmp/curl.log
+          echo "### response head (first 800 bytes) ###"
+          head -c 800 /tmp/resp.html 2>/dev/null || echo "(no response body)"
+          echo
+          echo "### response size ###"
+          wc -c /tmp/resp.html 2>/dev/null || true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
