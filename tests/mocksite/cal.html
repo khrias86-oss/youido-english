@@ -1,0 +1,60 @@
+<html><head><meta charset="utf-8"><title>mock 키즈카페 예약</title>
+<style>.layer{display:none;border:1px solid #333;padding:8px}.layer.on{display:block}</style></head>
+<body>
+<div class="cal_head">
+  <a href="#" class="btn_prev" onclick="return move(-1)">이전달</a>
+  <strong id="ym">2026.09</strong>
+  <a href="#" class="btn_next" onclick="return move(1)">다음달</a>
+</div>
+<table class="calendar">
+  <thead><tr><th>일</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th><th>토</th></tr></thead>
+  <tbody id="body"></tbody>
+</table>
+<div id="layer" class="layer">
+  <h3 id="layer_title"></h3>
+  <table class="time_table">
+    <thead><tr><th>회차</th><th>시간</th><th>정원</th><th>예약인원</th><th>선택</th></tr></thead>
+    <tbody id="times"></tbody>
+  </table>
+  <button type="button" class="close" onclick="document.getElementById('layer').classList.remove('on')">닫기</button>
+</div>
+<script>
+var month = 9;
+var data = {
+  9:  {19:[[20,20],[20,18]], 20:[[20,20],[20,20]], 26:[[20,5],[20,20]]},
+  10: {3:[[20,20],[20,19]]}
+};
+function render(){
+  document.getElementById('ym').textContent = '2026.' + (month<10?'0'+month:month);
+  var tb = document.getElementById('body'); tb.innerHTML='';
+  var tr = document.createElement('tr');
+  for (var d=1; d<=30; d++){
+    var td = document.createElement('td');
+    var ds = '2026' + (month<10?'0'+month:month) + (d<10?'0'+d:d);
+    var has = data[month] && data[month][d];
+    if (has) td.innerHTML = '<em>'+d+'</em><a href="javascript:void(0)" onclick="openDay(\''+ds+'\')">예약가능</a>';
+    else if (d % 7 == 1) td.innerHTML = '<em>'+d+'</em><span>휴관</span>';
+    else td.innerHTML = '<em>'+d+'</em><span>예약마감</span>';
+    tr.appendChild(td);
+    if (tr.children.length==7){ tb.appendChild(tr); tr=document.createElement('tr'); }
+  }
+  if (tr.children.length) tb.appendChild(tr);
+}
+function move(n){ month += n; render(); document.getElementById('layer').classList.remove('on'); return false; }
+function openDay(ds){
+  var d = parseInt(ds.substr(6,2),10);
+  var rows = data[month][d];
+  var times = [['1회차','09:00~10:50'],['2회차','11:00~12:50']];
+  var tb = document.getElementById('times'); tb.innerHTML='';
+  document.getElementById('layer_title').textContent = ds.substr(0,4)+'-'+ds.substr(4,2)+'-'+ds.substr(6,2)+' 회차 선택';
+  rows.forEach(function(r,i){
+    var dis = r[1] >= r[0] ? ' disabled' : '';
+    tb.innerHTML += '<tr><td>'+times[i][0]+'</td><td>'+times[i][1]+'</td><td>'+r[0]+'</td><td>'+r[1]+'</td><td><input type="radio" name="tme"'+dis+'></td></tr>';
+  });
+  // 실제 사이트처럼 XHR 도 하나 호출
+  fetch('/api/times.json?d='+ds).catch(function(){});
+  document.getElementById('layer').classList.add('on');
+}
+render();
+</script>
+</body></html>

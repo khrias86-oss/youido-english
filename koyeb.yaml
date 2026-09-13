@@ -1,0 +1,15 @@
+# Koyeb (카드 없이 무료 인스턴스 1개) - 콘솔에서 GitHub 저장소 선택 후 Dockerfile 빌드, 포트 8000, 환경변수는 render.yaml 과 동일하게 설정
+name: umppa-monitor
+services:
+  - name: web
+    type: web
+    instance_type: free
+    ports:
+      - port: 8000
+        protocol: http
+    env:
+      - key: TZ
+        value: Asia/Seoul
+    health_checks:
+      - path: /healthz
+        port: 8000

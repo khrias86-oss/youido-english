@@ -1,0 +1,65 @@
+# umppa-monitor 설정 예시. 복사해서 config.yaml 로 저장 후 수정하세요.
+# 비밀값은 ${ENV_VAR} 형태로 환경변수 참조 가능.
+
+targets:
+  # 1) 키즈카페 회차 예약 감시 (달력 페이지) - URL의 q_fcltyId 값이 id
+  - type: kidscafe
+    id: YF260101
+    name: 서울형 키즈카페 (YF260101)
+    months_ahead: 1          # 이번 달 + 다음 달
+    click_dates: true        # 날짜를 클릭해 회차별 잔여를 확인
+    weekdays: [5, 6]         # 0=월 ... 5=토, 6=일. 비우면 모든 요일
+    dates: []                # ["2026-09-20"] 처럼 특정 일자만 볼 수도 있음
+    sessions: []             # ["1회차", "10:00"] 처럼 회차/시간 부분일치 필터
+    min_remaining: 1
+
+  # 2) 프로그램 예약 감시 - 프로그램 상세 URL의 q_progrmSn 값이 id
+  - type: program
+    id: 8644
+    name: 키즈카페 프로그램 (8644)
+    enabled: false
+
+notifiers:
+  - type: console
+  # - type: telegram
+  #   token: ${UMPPA_TELEGRAM_TOKEN}
+  #   chat_id: ${UMPPA_TELEGRAM_CHAT_ID}
+  # - type: discord
+  #   webhook_url: ${UMPPA_DISCORD_WEBHOOK}
+  # - type: slack
+  #   webhook_url: ${UMPPA_SLACK_WEBHOOK}
+  # - type: ntfy
+  #   topic: my-kidscafe-topic          # https://ntfy.sh 앱 설치 후 토픽 구독
+  # - type: email
+  #   smtp_host: smtp.gmail.com
+  #   smtp_port: 587
+  #   username: ${UMPPA_SMTP_USER}
+  #   password: ${UMPPA_SMTP_PASS}
+  #   to: ["me@example.com"]
+
+browser:
+  headless: true
+  # executable_path: /opt/pw-browsers/chromium   # 별도 크로미움 사용 시
+  # storage_state: storage_state.json            # `umppa-monitor login` 으로 생성한 로그인 쿠키
+  timeout_ms: 30000
+
+schedule:
+  interval_sec: 300        # 5분 간격 (사이트 부하를 고려해 60초 미만은 권장하지 않음)
+  jitter_sec: 30
+  quiet_hours: ["00:30-06:30"]
+  notify_on_close: false
+  renotify_after_min: 0
+
+# 사이트 구조를 `umppa-monitor inspect` 로 확인한 뒤 필요 시 정밀 선택자 지정 (모두 선택 사항)
+parser:
+  # calendar_cell_selector: "table.calendar td"
+  # date_attr: "data-date"
+  # slot_selector: ".time-list li"
+  # next_month_selector: "a.next"
+  open_keywords: []
+  closed_keywords: []
+  # remaining_regex: "잔여\\s*(\\d+)"
+
+state_dir: state
+artifacts_dir: artifacts
+log_level: INFO

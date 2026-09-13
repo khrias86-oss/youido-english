@@ -1,0 +1,26 @@
+# Render Blueprint - 저장소를 Render 에 연결하면 이 파일로 무료 웹 서비스가 생성됩니다.
+# 대시보드: https://<서비스명>.onrender.com  (환경변수 UMPPA_WEB_PASSWORD 로 로그인)
+services:
+  - type: web
+    name: umppa-monitor
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: UMPPA_WEB_PASSWORD
+        sync: false          # 대시보드에서 직접 입력
+      - key: UMPPA_WEB_SECRET
+        generateValue: true
+      - key: UMPPA_TELEGRAM_TOKEN
+        sync: false
+      - key: UMPPA_TELEGRAM_CHAT_ID
+        sync: false
+      - key: UMPPA_NTFY_TOPIC
+        sync: false
+      - key: MONITOR_CONFIG_B64
+        sync: false          # (선택) config.yaml 을 base64 로 인코딩한 값
+      - key: TZ
+        value: Asia/Seoul
