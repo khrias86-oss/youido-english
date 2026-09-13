@@ -5,7 +5,7 @@
 - 감시 대상은 설정 파일에서 `type: kidscafe`(시설 ID) / `type: program`(프로그램 번호) 중 골라 여러 개 등록
 - 요일·날짜·회차·최소 잔여 인원 필터
 - 상태 전환(마감→가능)만 알림, 재알림·마감 알림 옵션
-- 로컬 상시 실행 또는 GitHub Actions 10분 주기 실행
+- 로컬 상시 실행 또는 GitHub Actions 10분 주기 실행, 무료 호스팅(Render/Koyeb) 모바일 대시보드
 - 계획서: [docs/PLAN.md](docs/PLAN.md)
 
 > **중요**: 이 코드는 사이트 HTML 을 직접 확인하지 못한 환경에서 작성되었습니다(네트워크 정책 차단). 파서는 공공 예약 사이트의 흔한 패턴을 넓게 인식하지만, 처음 실행 시 반드시 아래 **3단계(inspect)** 로 실제 구조를 확인하세요.
@@ -15,7 +15,7 @@
 ```bash
 git clone <this repo> && cd youido-english
 python3 -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[web,dev]"
 python -m playwright install chromium                   # 헤드리스 크로미움 설치
 ```
 
@@ -122,7 +122,23 @@ nohup umppa-monitor run -c config.yaml > monitor.log 2>&1 &
 
 Windows 는 작업 스케줄러에 `umppa-monitor once` 를 5분 주기로 등록해도 됩니다.
 
-## 5. GitHub Actions 로 실행 (PC 없이)
+## 5. 무료 퍼블리싱 + 모바일 사용
+
+자세한 절차는 **[docs/DEPLOY.md](docs/DEPLOY.md)** 를 보세요. 요약:
+
+| 방식 | 특징 |
+|---|---|
+| **GitHub Actions + GitHub Pages (기본 추천)** | 서버·카드 불필요. 10분마다 확인 → 텔레그램/ntfy 푸시 → 상태 페이지 `https://<계정>.github.io/<저장소>/` 게시. 휴대폰 GitHub 앱에서 `config.yaml` 수정 |
+| **Render / Koyeb 무료 Docker 웹 서비스** | 상시 실행 + 모바일 대시보드(`umppa-monitor serve`). 로그인 후 대상 추가·중지, 지금 확인, 알림 테스트, 로그. `render.yaml` 블루프린트 포함. 무료 인스턴스는 무활동 시 잠들므로 UptimeRobot 으로 `/healthz` 핑 |
+
+모바일 대시보드 로컬 실행:
+
+```bash
+UMPPA_WEB_PASSWORD=1234 umppa-monitor serve -c config.yaml --port 8000
+# 휴대폰과 같은 Wi-Fi 에서 http://<PC IP>:8000 접속 → "홈 화면에 추가"
+```
+
+## 5-1. GitHub Actions 로 실행 (PC 없이)
 
 `.github/workflows/monitor.yml` 이 10분마다 `umppa-monitor once` 를 실행하고 상태를 캐시에 보관합니다.
 
@@ -153,7 +169,9 @@ python -m pytest -q
 
 ```
 umppa_monitor/
-  cli.py            명령어 (run / once / inspect / parse-file / test-notify / login / show-state)
+  cli.py            명령어 (run / once / serve / export-status / inspect / parse-file / test-notify / login / show-state)
+  web.py            모바일 웹 대시보드 (FastAPI), service.py 백그라운드 감시, config_store.py 설정 편집
+  render_html.py    대시보드·정적 상태 페이지 HTML
   config.py         YAML 설정
   models.py         Target / Slot
   browser.py        Playwright 수집 + XHR 캡처 + inspect 덤프
@@ -163,8 +181,9 @@ umppa_monitor/
   scheduler.py      감시 루프
   notify/           채널 구현 및 메시지 포맷
 tests/              픽스처 기반 단위 테스트
-docs/PLAN.md        개발 계획서
-.github/workflows/  monitor.yml (cron), ci.yml (테스트)
+docs/PLAN.md        개발 계획서, docs/DEPLOY.md 무료 배포 가이드
+Dockerfile, render.yaml, koyeb.yaml   무료 Docker 호스팅용
+.github/workflows/  monitor.yml (cron + Pages 게시), ci.yml (테스트)
 ```
 
 ## 9. 유의사항

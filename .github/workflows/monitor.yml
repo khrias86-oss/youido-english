@@ -1,21 +1,26 @@
-# 서울형 키즈카페 빈자리 감시 - GitHub Actions 호스팅 실행
+# 서울형 키즈카페 빈자리 감시 - GitHub Actions 호스팅 실행 (무료, 서버 불필요)
 #
-# 주의:
-#  - GitHub 의 cron 은 최소 5분 간격이며 실제 실행은 수 분 지연될 수 있습니다.
-#    (정확한 주기가 필요하면 로컬 PC / 라즈베리파이 / 소형 VM 에서 `umppa-monitor run` 을 권장)
-#  - 알림 토큰은 저장소 Settings > Secrets and variables > Actions 에 등록하세요.
-#  - 저장소 변수(Variables) MONITOR_CONFIG_B64 에 config.yaml 을 base64 로 넣거나,
-#    저장소에 config.yaml 을 커밋해 두세요 (토큰은 ${ENV} 참조로만).
+# 동작: 10분마다 1회 확인 → 새로 열린 자리는 텔레그램/ntfy 등으로 푸시 → 현황을 GitHub Pages 에 게시
+# 준비:
+#  1) Settings > Secrets and variables > Actions > Secrets 에 알림 토큰 등록 (아래 env 참고)
+#  2) Settings > Pages > Source 를 "GitHub Actions" 로 설정 (상태 페이지: https://<계정>.github.io/<저장소>/)
+#  3) config.yaml 을 커밋하거나(토큰은 ${ENV} 참조만), Variables 에 MONITOR_CONFIG_B64 (base64 인코딩) 등록
+# 주의: 공개 저장소는 Actions 분수 무제한, 비공개는 월 2,000분. cron 은 최소 5분 간격이며 지연될 수 있음.
 name: kidscafe-vacancy-monitor
 
 on:
   schedule:
-    - cron: "*/10 * * * *"     # 10분마다 (UTC 기준)
+    - cron: "*/10 * * * *"       # 10분마다 (UTC). 비공개 저장소면 "*/30 22-13 * * *" 처럼 줄이세요 (KST 07~22시)
   workflow_dispatch: {}
 
 concurrency:
   group: monitor
   cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   monitor:
@@ -28,6 +33,7 @@ jobs:
       UMPPA_SLACK_WEBHOOK: ${{ secrets.UMPPA_SLACK_WEBHOOK }}
       UMPPA_NTFY_TOPIC: ${{ secrets.UMPPA_NTFY_TOPIC }}
       TZ: Asia/Seoul
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
     steps:
       - uses: actions/checkout@v4
 
@@ -36,10 +42,26 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install
-        run: |
-          pip install -e .
-          python -m playwright install --with-deps chromium
+      - name: Install package
+        run: pip install -e .
+
+      - name: Playwright version
+        id: pw
+        run: echo "v=$(python -c 'import importlib.metadata as m;print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: .pw-browsers
+          key: pw-chromium-${{ runner.os }}-${{ steps.pw.outputs.v }}
+
+      - name: Install Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install chromium
+
+      - name: Install Chromium OS deps
+        run: python -m playwright install-deps chromium
 
       - name: Prepare config
         run: |
@@ -65,3 +87,26 @@ jobs:
         with:
           path: state
           key: monitor-state-${{ github.run_id }}
+
+      - name: Export status page
+        if: always()
+        run: umppa-monitor export-status -c config.yaml --out site --source-url "${{ github.server_url }}/${{ github.repository }}/actions/workflows/monitor.yml"
+
+      - name: Upload Pages artifact
+        if: always()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  publish:
+    needs: monitor
+    if: always() && needs.monitor.result != 'cancelled'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true    # Pages 미설정 시에도 감시 자체는 실패로 만들지 않음

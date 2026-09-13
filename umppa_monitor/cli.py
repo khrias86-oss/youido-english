@@ -7,6 +7,8 @@
   umppa-monitor test-notify -c config.yaml    알림 채널 테스트
   umppa-monitor login      -c config.yaml     (headed) 로그인 후 쿠키 저장
   umppa-monitor show-state -c config.yaml     저장된 스냅샷 출력
+  umppa-monitor serve      -c config.yaml     모바일 웹 대시보드 + 감시 루프 (--port)
+  umppa-monitor export-status -c config.yaml --out site   정적 상태 페이지 생성 (GitHub Pages 용)
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import signal
 import sys
 import time
@@ -147,6 +150,44 @@ def cmd_show_state(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from .web import serve
+    cfg = _load(args)
+    port = int(args.port or os.environ.get("PORT", 8000))
+    serve(args.config, host=args.host, port=port)
+    return 0
+
+
+def cmd_export_status(args) -> int:
+    """state/ 스냅샷을 읽어 정적 상태 페이지(index.html, status.json, manifest, icon)를 생성."""
+    from .render_html import ICON_SVG, MANIFEST, static_status_page, status_json
+    from .state import StateStore
+    cfg = _load(args)
+    store = StateStore(cfg.state_dir)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    items = []
+    payload = []
+    for t in cfg.targets:
+        if not t.enabled:
+            continue
+        snap = store.load(t.key)
+        slots = sorted(snap.slots.values(), key=lambda s: (s.date or "", s.session)) if snap else []
+        items.append((t.display_name(), t.resolved_url(), slots, snap.taken_at if snap else None))
+        payload.append({"key": t.key, "name": t.display_name(), "url": t.resolved_url(),
+                        "checked_at": snap.taken_at if snap else None,
+                        "open": [s.to_dict() for s in slots if s.is_open], "total": len(slots)})
+    now = time.time()
+    (out / "index.html").write_text(static_status_page(items, cfg.browser.timezone, now, args.source_url),
+                                    encoding="utf-8")
+    (out / "status.json").write_text(status_json(payload, now), encoding="utf-8")
+    (out / "manifest.webmanifest").write_text(json.dumps(MANIFEST, ensure_ascii=False), encoding="utf-8")
+    (out / "icon.svg").write_text(ICON_SVG, encoding="utf-8")
+    (out / ".nojekyll").write_text("", encoding="utf-8")
+    print(f"exported {len(items)} targets -> {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="umppa-monitor", description="서울형 키즈카페 빈자리 감시")
     p.add_argument("--version", action="version", version=__version__)
@@ -166,6 +207,18 @@ def build_parser() -> argparse.ArgumentParser:
     common(sp)
     sp.add_argument("--target", help="특정 target id 만")
     sp.set_defaults(func=cmd_inspect)
+
+    sp = sub.add_parser("serve", help="웹 대시보드 실행")
+    common(sp)
+    sp.add_argument("--host", default="0.0.0.0")
+    sp.add_argument("--port", type=int, default=None)
+    sp.set_defaults(func=cmd_serve)
+
+    sp = sub.add_parser("export-status", help="정적 상태 페이지 생성")
+    common(sp)
+    sp.add_argument("--out", default="site")
+    sp.add_argument("--source-url", default=None, help="페이지 하단에 표시할 저장소/Actions 링크")
+    sp.set_defaults(func=cmd_export_status)
 
     sp = sub.add_parser("parse-file", help="저장된 HTML 파싱 테스트")
     sp.add_argument("file")

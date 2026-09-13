@@ -9,3 +9,5 @@ artifacts/
 *.log
 storage_state.json
 .env
+site/
+/data/
