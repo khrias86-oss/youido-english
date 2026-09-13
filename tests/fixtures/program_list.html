@@ -1,0 +1,35 @@
+<!-- 키즈카페 프로그램 목록 페이지(BD_selectKidsCafeProgrmList.do) 재현본.
+     제목이 링크인 표 형태이고, 상세로 가는 방법이 두 가지(쿼리스트링/자바스크립트 호출)로 섞여 있다. -->
+<html><body>
+<div id="wrap">
+<h2>프로그램 예약</h2>
+<table class="board">
+  <caption>프로그램 목록</caption>
+  <thead><tr><th>번호</th><th>프로그램명</th><th>운영기간</th><th>정원</th><th>상태</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>3</td>
+      <td><a href="/icare/user/kidsCafeProgrm/BD_selectKidsCafeProgrm.do?q_progrmSn=8644">오감놀이 교실</a></td>
+      <td>2026.09.20 ~ 2026.09.30</td>
+      <td>12</td>
+      <td>접수중</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><a href="#" onclick="fn_view('8512'); return false;">북아트 원데이 클래스</a></td>
+      <td>2026.10.01 ~ 2026.10.15</td>
+      <td>10</td>
+      <td>마감</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td><a href="/icare/user/kidsCafeProgrm/BD_selectKidsCafeProgrm.do?q_progrmSn=7001">숲속 체험놀이</a></td>
+      <td>2026.11.02 ~ 2026.11.20</td>
+      <td>20</td>
+      <td>예정</td>
+    </tr>
+  </tbody>
+</table>
+<div class="paging"><a href="?page=2">2</a><a href="?page=3">3</a></div>
+</div>
+</body></html>

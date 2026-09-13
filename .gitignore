@@ -11,3 +11,4 @@ storage_state.json
 .env
 site/
 /data/
+public/

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "echo 'no dependencies to install'",
+  "buildCommand": "bash scripts/vercel-build.sh",
+  "outputDirectory": "public",
+  "headers": [
+    {
+      "source": "/config.js",
+      "headers": [{ "key": "cache-control", "value": "no-store" }]
+    }
+  ]
+}

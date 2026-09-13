@@ -26,5 +26,8 @@ umppa-monitor = "umppa_monitor.cli:main"
 [tool.setuptools.packages.find]
 include = ["umppa_monitor*"]
 
+[tool.setuptools.package-data]
+umppa_monitor = ["webapp/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

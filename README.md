@@ -110,10 +110,14 @@ umppa-monitor inspect -c config.yaml
 ## 4. 실행
 
 ```bash
-umppa-monitor once -c config.yaml     # 1회 확인 (cron 용)
-umppa-monitor run  -c config.yaml     # 상시 감시 (Ctrl+C 로 종료)
+umppa-monitor once -c config.yaml              # 1회 확인 (cron 용)
+umppa-monitor run  -c config.yaml              # 상시 감시 (Ctrl+C 로 종료)
 umppa-monitor show-state -c config.yaml
+umppa-monitor discover-programs -c config.yaml # 프로그램 목록 수집 (웹 앱의 선택지)
+umppa-monitor export-status -c config.yaml --out site   # 달력 웹 앱 + data.json 생성
 ```
+
+`once` / `run` 은 `webstate/prefs.json` 이 있으면 그 조건(요일·날짜·회차·최소 잔여 인원)을 `config.yaml` 의 필터 위에 덮어씁니다. 즉 웹에서 고른 조건이 그대로 감시에 적용됩니다.
 
 백그라운드 상시 실행 예 (Linux/macOS):
 
@@ -123,16 +127,48 @@ nohup umppa-monitor run -c config.yaml > monitor.log 2>&1 &
 
 Windows 는 작업 스케줄러에 `umppa-monitor once` 를 5분 주기로 등록해도 됩니다.
 
-## 5. 무료 퍼블리싱 + 모바일 사용
+## 5. 웹 앱 (달력에서 날짜·회차 고르기)
 
-자세한 절차는 **[docs/DEPLOY.md](docs/DEPLOY.md)** 를 보세요. 요약:
+`export-status` 가 만드는 정적 사이트는 단순 목록이 아니라 **달력 웹 앱**입니다. 첫 화면에서 당월 현황을 보고, 감시할 조건을 화면에서 직접 고릅니다. YAML 을 편집할 필요가 없습니다.
+
+- **당월 달력 히트맵**: 날짜 × 회차 잔여 인원. 색이 진할수록 자리가 많고, 점(·)은 "확인했지만 빈자리 없음", 빈 칸은 "정보 없음"
+- **요일별 빈자리 합계**: 그 달의 요일별 총 잔여. 요일을 누르면 바로 감시 조건에 들어감
+- **날짜를 누르면** 그 날의 회차 목록이 열리고, 회차를 눌러 감시 대상에 넣고 뺌. "이 날짜만 감시"도 가능
+- **대상 탭**: 키즈카페와 프로그램을 각각 독립된 조건으로 감시 (요일·회차·최소 잔여 인원이 대상별로 따로 저장됨)
+- **프로그램 선택**: `discover-programs` 가 수집한 프로그램 목록에서 체크만 하면 다음 확인부터 별도 대상으로 감시
+- 다크 모드, 홈 화면에 추가(PWA), 390px 폭 대응
+
+조건 저장 방식은 두 가지입니다.
+
+| 배포 | 조건 저장 | 비고 |
+|---|---|---|
+| **GitHub Pages 만** | 브라우저(localStorage) | 화면 필터로는 즉시 동작. 알림까지 반영되지는 않음 |
+| **+ Vercel API** | 저장소 `webstate/prefs.json` | 웹에서 고른 조건이 다음 감시부터 알림에 그대로 적용 |
+
+### 5-1. Vercel 에 배포해 조건까지 반영하기
+
+1. [vercel.com](https://vercel.com) → **Add New → Project** → 이 저장소 import (`vercel.json` 이 빌드를 알아서 처리)
+2. 프로젝트 **Settings → Environment Variables** 에 등록
+   | 이름 | 값 |
+   |---|---|
+   | `UMPPA_REPO` | `<계정>/<저장소>` |
+   | `UMPPA_GITHUB_TOKEN` | 저장소 **Contents: Read and write** 권한의 fine-grained PAT (즉시 확인까지 쓰려면 **Actions: Read and write** 도) |
+   | `UMPPA_PIN` | 조건 저장 시 요구할 비밀번호 (비우면 누구나 저장 가능) |
+3. 저장소 **Settings → Secrets and variables → Actions → Variables** 에 `WEB_API_BASE` = 배포된 주소(`https://<앱>.vercel.app`) 등록
+4. 다음 감시 실행부터 Pages 의 앱이 이 API 로 조건을 저장합니다
+
+배포된 앱은 빈자리 데이터를 GitHub Pages 의 `data.json` 에서 읽습니다. 감시 자체는 GitHub Actions 에 남겨 두어 무료 인스턴스가 잠들 걱정이 없습니다.
+
+### 5-2. 다른 호스팅
+
+자세한 절차는 **[docs/DEPLOY.md](docs/DEPLOY.md)** 를 보세요.
 
 | 방식 | 특징 |
 |---|---|
-| **GitHub Actions + GitHub Pages (기본 추천)** | 서버·카드 불필요. 10분마다 확인 → 텔레그램/ntfy 푸시 → 상태 페이지 `https://<계정>.github.io/<저장소>/` 게시. 휴대폰 GitHub 앱에서 `config.yaml` 수정 |
-| **Render / Koyeb 무료 Docker 웹 서비스** | 상시 실행 + 모바일 대시보드(`umppa-monitor serve`). 로그인 후 대상 추가·중지, 지금 확인, 알림 테스트, 로그. `render.yaml` 블루프린트 포함. 무료 인스턴스는 무활동 시 잠들므로 UptimeRobot 으로 `/healthz` 핑 |
+| **GitHub Actions + GitHub Pages (기본)** | 서버·카드 불필요. 10분마다 확인 → ntfy/텔레그램 푸시 → 달력 앱을 `https://<계정>.github.io/<저장소>/` 에 게시 |
+| **Render / Koyeb 무료 Docker** | 감시까지 한 프로세스에서 도는 자립형(`umppa-monitor serve`). 무료 인스턴스는 무활동 시 잠들므로 UptimeRobot 으로 `/healthz` 핑 |
 
-모바일 대시보드 로컬 실행:
+관리자용 폼 대시보드(대상 추가·중지, 지금 확인, 로그)를 로컬에서 띄우려면:
 
 ```bash
 UMPPA_WEB_PASSWORD=1234 umppa-monitor serve -c config.yaml --port 8000
@@ -153,10 +189,18 @@ UMPPA_WEB_PASSWORD=1234 umppa-monitor serve -c config.yaml --port 8000
 ## 6. 동작 원리 요약
 
 ```
+[감시 → 웹]
 브라우저로 페이지 로드 → (달력) 다음달 이동·날짜 클릭으로 회차 수집, XHR JSON 캡처
-→ 파서가 (날짜, 회차, 상태, 잔여, 정원) 으로 정규화 → 필터 → 이전 스냅샷과 비교
-→ 새로 열린 슬롯만 알림 → state/ 에 스냅샷 저장
+→ 파서가 (날짜, 회차, 상태, 잔여, 정원) 으로 정규화
+→ 필터 통과분: 이전 스냅샷과 비교해 새로 열린 슬롯만 알림 (state/)
+→ 필터 이전 전체: state/webdata.json → data.json → 달력 앱이 월 전체를 그림
+
+[웹 → 감시]
+앱에서 요일·날짜·회차 선택 → /api/prefs (Vercel) → webstate/prefs.json 커밋
+→ 다음 `once` 실행이 이 조건을 config 필터에 덮어씀 → 알림 범위가 바뀜
 ```
+
+달력에 "빈자리 없는 날"까지 보이려면 필터 이전 데이터가 필요해, 알림용 스냅샷과 화면용 스냅샷을 따로 둡니다.
 
 상태 판별: 잔여 숫자 > 닫힘 키워드(마감·불가·휴관·대기) > 열림 키워드(예약가능·신청) > 클릭 가능 여부.
 
@@ -170,22 +214,31 @@ python -m pytest -q
 
 ```
 umppa_monitor/
-  cli.py            명령어 (run / once / serve / export-status / inspect / parse-file / test-notify / login / show-state)
-  web.py            모바일 웹 대시보드 (FastAPI), service.py 백그라운드 감시, config_store.py 설정 편집
-  render_html.py    대시보드·정적 상태 페이지 HTML
+  cli.py            명령어 (run / once / serve / export-status / discover-programs /
+                    inspect / parse-file / test-notify / login / show-state)
+  webapp/           달력 웹 앱 (index.html, app.js, style.css, manifest, icon) — 정적, 빌드 불필요
+  webdata.py        웹 앱이 읽는 data.json 생성 + 웹에서 고른 감시 조건(prefs) 적용
+  web.py            관리자용 폼 대시보드 (FastAPI), service.py 백그라운드 감시, config_store.py 설정 편집
+  render_html.py    대시보드·요약 페이지 HTML
   config.py         YAML 설정
   models.py         Target / Slot
-  browser.py        Playwright 수집 + XHR 캡처 + inspect 덤프
+  browser.py        Playwright 수집 + XHR 캡처 + inspect 덤프 + 프로그램 목록 수집
   scanner.py        수집 결과 → Slot 병합·필터
-  parsers/          calendar.py (달력·회차 DOM), program.py, network.py (JSON), common.py (휴리스틱)
+  parsers/          calendar.py (달력·회차 DOM), program.py (상세·목록), network.py (JSON), common.py (휴리스틱)
   state.py          스냅샷 저장·diff
   scheduler.py      감시 루프
   notify/           채널 구현 및 메시지 포맷
+api/prefs.js        웹에서 고른 감시 조건을 webstate/prefs.json 으로 커밋하는 Vercel 함수
+vercel.json, scripts/vercel-build.sh   Vercel 배포 설정
+webstate/prefs.json 현재 적용 중인 감시 조건 (웹 앱이 갱신)
 tests/              픽스처 기반 단위 테스트
 docs/PLAN.md        개발 계획서, docs/DEPLOY.md 무료 배포 가이드
 Dockerfile, render.yaml, koyeb.yaml   무료 Docker 호스팅용
 .github/workflows/  monitor.yml (cron + Pages 게시), ci.yml (테스트)
 ```
+
+내보낸 사이트 구성: `index.html`(달력 앱) · `data.json`(달력 데이터) · `config.js`(데이터/API 주소) ·
+`summary.html`(자바스크립트 없이 보는 요약) · `status.json`(기존 연동용)
 
 ## 9. 유의사항
 

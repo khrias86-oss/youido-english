@@ -78,6 +78,16 @@ jobs:
           key: monitor-state-${{ github.run_id }}
           restore-keys: monitor-state-
 
+      # 웹앱의 "프로그램 감시 대상" 선택지. 매 10분마다 받을 필요는 없어 한 시간에 한 번만.
+      - name: Discover programs
+        continue-on-error: true
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(date -u +%M)" -lt 10 ]; then
+            umppa-monitor discover-programs -c config.yaml
+          else
+            echo "이번 실행은 건너뜁니다 (프로그램 목록은 1시간 주기)"
+          fi
+
       - name: Run one check
         run: umppa-monitor once -c config.yaml
 
@@ -88,9 +98,14 @@ jobs:
           path: state
           key: monitor-state-${{ github.run_id }}
 
+      # vars.WEB_API_BASE 를 등록하면(예: https://<앱>.vercel.app) 웹앱에서 고른 감시
+      # 조건이 저장소로 저장돼 다음 실행에 반영된다. 비어 있으면 조건은 브라우저에만 남는다.
       - name: Export status page
         if: always()
-        run: umppa-monitor export-status -c config.yaml --out site --source-url "${{ github.server_url }}/${{ github.repository }}/actions/workflows/monitor.yml"
+        run: |
+          umppa-monitor export-status -c config.yaml --out site \
+            --source-url "${{ github.server_url }}/${{ github.repository }}/actions/workflows/monitor.yml" \
+            --api-base "${{ vars.WEB_API_BASE }}"
 
       - name: Upload Pages artifact
         if: always()

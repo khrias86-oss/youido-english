@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import time
@@ -35,16 +36,46 @@ def _setup_logging(level: str) -> None:
     logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
+WEBSTATE_DIR = "webstate"      # 웹 UI 가 저장한 감시 조건이 놓이는 저장소 내 폴더
+
+
 def _load(args) -> AppConfig:
     cfg = load_config(args.config)
     _setup_logging(args.log_level or cfg.log_level)
     return cfg
 
 
+def _repo_dir(config_path: str) -> Path:
+    return Path(config_path).resolve().parent
+
+
+def _load_programs(cfg: AppConfig) -> list[dict]:
+    """discover-programs 가 캐시해 둔 프로그램 목록 (없으면 빈 목록)."""
+    p = Path(cfg.state_dir) / "programs.json"
+    if not p.exists():
+        return []
+    try:
+        return json.loads(p.read_text(encoding="utf-8")).get("programs", [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _load_web_prefs(args, cfg: AppConfig):
+    """웹 UI 에서 고른 감시 조건을 읽어 설정에 적용하고, 적용한 조건을 돌려준다."""
+    from .webdata import PREFS_FILENAME, apply_prefs, load_prefs
+    prefs = load_prefs(_repo_dir(args.config) / WEBSTATE_DIR / PREFS_FILENAME)
+    if prefs is not None:
+        apply_prefs(cfg, prefs, _load_programs(cfg))
+        logging.getLogger(__name__).info(
+            "웹에서 저장한 감시 조건 적용: 대상 %d개, 프로그램 %d개", len(prefs.targets), len(prefs.programs))
+    return prefs
+
+
 def cmd_run(args) -> int:
     from .notify.factory import build_notifiers
     from .scheduler import run_loop
     cfg = _load(args)
+    _load_web_prefs(args, cfg)
     run_loop(cfg, build_notifiers(cfg.notifiers), once=False)
     return 0
 
@@ -53,7 +84,29 @@ def cmd_once(args) -> int:
     from .notify.factory import build_notifiers
     from .scheduler import run_loop
     cfg = _load(args)
+    _load_web_prefs(args, cfg)
     run_loop(cfg, build_notifiers(cfg.notifiers), once=True)
+    return 0
+
+
+def cmd_discover_programs(args) -> int:
+    """프로그램 목록을 수집해 state/programs.json 에 캐시 (웹 앱의 선택지)."""
+    from .browser import BrowserSession, allowed_hosts_for, fetch_program_list
+    from .parsers.program import parse_program_list_html
+    cfg = _load(args)
+    fclty = args.facility or next((t.id for t in cfg.targets if t.kind == TargetKind.KIDSCAFE), "")
+    with BrowserSession(cfg.browser, allowed_hosts_for(cfg.targets)) as session:
+        url, html = fetch_program_list(session, fclty)
+    programs = parse_program_list_html(html, url)
+    out = Path(cfg.state_dir) / "programs.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"fetched_at": time.time(), "source": url, "facility": fclty,
+                               "programs": programs}, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"프로그램 {len(programs)}개 수집 -> {out}")
+    for p in programs[:30]:
+        print(f"  {p['id']:>8}  {p['name'][:40]:<40} {p.get('status', '')} {p.get('period', '')}")
+    if not programs:
+        print("목록을 찾지 못했습니다. `umppa-monitor inspect` 로 페이지 구조를 확인하세요.")
     return 0
 
 
@@ -159,15 +212,32 @@ def cmd_serve(args) -> int:
 
 
 def cmd_export_status(args) -> int:
-    """state/ 스냅샷을 읽어 정적 상태 페이지(index.html, status.json, manifest, icon)를 생성."""
-    from .render_html import ICON_SVG, MANIFEST, static_status_page, status_json
+    """정적 사이트 생성: 달력 웹앱 + 앱이 읽는 data.json (+ JS 없이 볼 수 있는 요약 페이지)."""
+    from .render_html import static_status_page, status_json
     from .state import StateStore
+    from .webdata import build_snapshot
     cfg = _load(args)
+    prefs = _load_web_prefs(args, cfg)
     store = StateStore(cfg.state_dir)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    items = []
-    payload = []
+
+    # 1) 달력 웹앱 (패키지 안의 정적 파일을 그대로 복사)
+    app_dir = Path(__file__).parent / "webapp"
+    if app_dir.is_dir():
+        shutil.copytree(app_dir, out, dirs_exist_ok=True)
+
+    # 2) 웹앱이 읽는 데이터와 접속 설정
+    programs = _load_programs(cfg)
+    (out / "data.json").write_text(
+        json.dumps(build_snapshot(cfg, cfg.state_dir, prefs, programs), ensure_ascii=False), encoding="utf-8")
+    (out / "config.js").write_text(
+        "window.UMPPA_CONFIG=" + json.dumps(
+            {"dataUrl": "./data.json", "apiBase": args.api_base or "", "sourceUrl": args.source_url or ""},
+            ensure_ascii=False) + ";\n", encoding="utf-8")
+
+    # 3) 요약 페이지: 자바스크립트가 막힌 환경에서도 현황만은 보이도록 남겨 둔다
+    items, payload = [], []
     for t in cfg.targets:
         if not t.enabled:
             continue
@@ -178,13 +248,11 @@ def cmd_export_status(args) -> int:
                         "checked_at": snap.taken_at if snap else None,
                         "open": [s.to_dict() for s in slots if s.is_open], "total": len(slots)})
     now = time.time()
-    (out / "index.html").write_text(static_status_page(items, cfg.browser.timezone, now, args.source_url),
-                                    encoding="utf-8")
+    (out / "summary.html").write_text(static_status_page(items, cfg.browser.timezone, now, args.source_url),
+                                      encoding="utf-8")
     (out / "status.json").write_text(status_json(payload, now), encoding="utf-8")
-    (out / "manifest.webmanifest").write_text(json.dumps(MANIFEST, ensure_ascii=False), encoding="utf-8")
-    (out / "icon.svg").write_text(ICON_SVG, encoding="utf-8")
-    (out / ".nojekyll").write_text("", encoding="utf-8")
-    print(f"exported {len(items)} targets -> {out}")
+    (out / ".nojekyll").write_text("", encoding="utf-8")   # GitHub Pages 가 _ 파일을 지우지 않게
+    print(f"exported {len(items)} targets, {len(programs)} programs -> {out}")
     return 0
 
 
@@ -214,11 +282,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--port", type=int, default=None)
     sp.set_defaults(func=cmd_serve)
 
-    sp = sub.add_parser("export-status", help="정적 상태 페이지 생성")
+    sp = sub.add_parser("export-status", help="정적 사이트(달력 웹앱 + data.json) 생성")
     common(sp)
     sp.add_argument("--out", default="site")
     sp.add_argument("--source-url", default=None, help="페이지 하단에 표시할 저장소/Actions 링크")
+    sp.add_argument("--api-base", default=None,
+                    help="감시 조건 저장 API 주소 (예: https://<앱>.vercel.app). 비우면 조건을 브라우저에만 저장")
     sp.set_defaults(func=cmd_export_status)
+
+    sp = sub.add_parser("discover-programs", help="프로그램 목록 수집 (웹앱의 선택지)")
+    common(sp)
+    sp.add_argument("--facility", default=None, help="시설 ID (기본: 설정의 첫 키즈카페)")
+    sp.set_defaults(func=cmd_discover_programs)
 
     sp = sub.add_parser("parse-file", help="저장된 HTML 파싱 테스트")
     sp.add_argument("file")
