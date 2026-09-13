@@ -50,6 +50,11 @@ TIME_RANGE_RE = re.compile(r"(\d{1,2}\s*:\s*\d{2})\s*[~\-–]\s*(\d{1,2}\s*:\s*\
 TIME_SINGLE_RE = re.compile(r"\b(\d{1,2}:\d{2})\b")
 SESSION_RE = re.compile(r"(\d+)\s*회\s*차")
 
+# 우리동네키움포털 실사이트 달력 표기: "13 1회 개인 0 2회 개인 0 3회 개인 2 4회 개인 0"
+# "잔여"라는 단어 없이 "N회 (개인|공용|단체) 남은인원" 이 반복되는 형태로, 회차 뒤에
+# "차"가 붙지 않는다(SESSION_RE 는 매칭하지 못함). 마지막 정수가 그 회차의 잔여 인원이다.
+ROUND_COUNT_RE = re.compile(r"(\d+)\s*회\s*(개인|공용|단체)?\s*(\d+)")
+
 
 @dataclass
 class Classification:
@@ -179,6 +184,18 @@ def extract_session_label(text: str) -> str:
     if parts:
         return " ".join(parts)
     return t[:40]
+
+
+def extract_round_counts(text: str) -> list[tuple[int, str, int]]:
+    """'1회 개인 0 2회 공용 33' 형태에서 (회차, 구분, 잔여인원) 목록을 추출.
+
+    우리동네키움포털 실사이트 달력은 날짜 셀에 회차별 잔여 인원을 이렇게
+    나열해 보여준다(숫자 0 = 마감, 그 외 = 잔여 인원). 매치가 없으면 빈 리스트.
+    """
+    out: list[tuple[int, str, int]] = []
+    for m in ROUND_COUNT_RE.finditer(normalize_ws(text)):
+        out.append((int(m.group(1)), m.group(2) or "", int(m.group(3))))
+    return out
 
 
 HEADER_REMAIN = ("잔여", "남은", "여석", "가능인원", "가능 인원", "예약가능")

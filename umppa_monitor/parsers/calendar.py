@@ -9,7 +9,8 @@ from bs4 import BeautifulSoup, Tag
 
 from ..config import ParserOverrides
 from ..models import Slot, SlotStatus, Target, normalize_date
-from .common import classify_text, extract_session_label, normalize_ws, table_row_numbers, TIME_RANGE_RE, SESSION_RE
+from .common import (classify_text, extract_round_counts, extract_session_label, normalize_ws,
+                     table_row_numbers, TIME_RANGE_RE, SESSION_RE)
 
 DAY_NUM_RE = re.compile(r"^\s*(\d{1,2})\s*(?:일)?\s*$")
 YEAR_MONTH_RE = re.compile(r"(20\d{2})\s*[.년\-/]\s*(\d{1,2})\s*(?:월)?")
@@ -153,6 +154,21 @@ def parse_calendar_html(
             continue
 
         day_text = re.sub(r"^\s*\d{1,2}\s*(일)?\s*", "", text)  # 앞의 일자 숫자 제거
+
+        # 우리동네키움포털 실사이트 표기: "1회 개인 0 2회 개인 0 3회 개인 2 ..." 처럼
+        # 회차별 잔여 인원이 별도 하위 요소 없이 한 셀 텍스트에 나열되는 경우가 있다.
+        # (SESSION_RE 의 "N회차" 표기와 달리 "N회"+구분+숫자 형태라 leaf_items 로는 안 잡힘)
+        rounds = extract_round_counts(day_text)
+        if rounds:
+            for rnd, kind, remaining in rounds:
+                status = SlotStatus.OPEN if remaining > 0 else SlotStatus.FULL
+                label = f"{rnd}회차" + (f" {kind}" if kind else "")
+                slot = Slot(target.key, target.kind, d, label, status, remaining, None, day_text, page_url)
+                if slot.key not in seen:
+                    seen.add(slot.key)
+                    slots.append(slot)
+            continue
+
         cl = classify_text(day_text, ov.open_keywords, ov.closed_keywords, ov.remaining_regex,
                            clickable=_is_clickable(cell))
         slot = Slot(target.key, target.kind, d, "day", cl.status, cl.remaining, cl.capacity, text, page_url)

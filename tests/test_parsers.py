@@ -156,3 +156,58 @@ def test_parse_json_payload_variants():
     assert by[("2026-09-21", "3회차")].remaining == 3
     assert by[("2026-09-22", "day")].status == SlotStatus.CLOSED
     assert by[("2026-09-23", "day")].status == SlotStatus.OPEN
+
+
+def test_extract_round_counts():
+    from umppa_monitor.parsers.common import extract_round_counts
+    assert extract_round_counts("1회 개인 0 2회 개인 0 3회 개인 2 4회 개인 0") == [
+        (1, "개인", 0), (2, "개인", 0), (3, "개인", 2), (4, "개인", 0),
+    ]
+    assert extract_round_counts("1회 공용 38 2회 개인 33 3회 개인 0") == [
+        (1, "공용", 38), (2, "개인", 33), (3, "개인", 0),
+    ]
+    assert extract_round_counts("휴일") == []
+
+
+def test_parse_calendar_real_seoul_format():
+    """실제 우리동네키움포털 달력 표기('N회 개인/공용 잔여인원')를 올바르게 해석하는지 검증.
+
+    2026-09-13 GitHub Actions 워크플로에서 실사이트를 직접 확인해 얻은 마크업 기준
+    (배포 브랜치 claude/network-diagnostics 의 "Dump calendar cell debug info" 로그).
+    """
+    slots = parse_calendar_html(_fx("calendar_real_seoul.html"), KC, ParserOverrides(), "u")
+    by = {(s.date, s.session): s for s in slots}
+
+    # 휴일: 회차 정보 없음 -> 휴관으로 분류 (day 단위)
+    assert by[("2026-09-07", "day")].status == SlotStatus.CLOSED
+    assert by[("2026-09-14", "day")].status == SlotStatus.CLOSED
+    assert by[("2026-09-21", "day")].status == SlotStatus.CLOSED
+    assert by[("2026-09-24", "day")].status == SlotStatus.CLOSED  # 추석연휴
+
+    # 아직 예약 기간이 열리지 않은 순수 숫자만 있는 날짜 (22, 23) -> 오픈 아님
+    assert by[("2026-09-22", "day")].status != SlotStatus.OPEN
+    assert by[("2026-09-23", "day")].status != SlotStatus.OPEN
+
+    # 회차별 잔여 인원이 정확히 회차 단위 Slot 으로 분해되는지
+    d13 = {k: s for k, s in by.items() if k[0] == "2026-09-13"}
+    assert len(d13) == 4
+    assert by[("2026-09-13", "1회차 개인")].status == SlotStatus.FULL
+    assert by[("2026-09-13", "1회차 개인")].remaining == 0
+    s = by[("2026-09-13", "3회차 개인")]
+    assert s.status == SlotStatus.OPEN and s.remaining == 2
+
+    # 공용/개인 구분과 두 자리 잔여 인원도 정확히 파싱
+    s = by[("2026-09-15", "1회차 공용")]
+    assert s.status == SlotStatus.OPEN and s.remaining == 38
+    s = by[("2026-09-15", "2회차 개인")]
+    assert s.status == SlotStatus.OPEN and s.remaining == 33
+    assert by[("2026-09-15", "3회차 개인")].status == SlotStatus.FULL
+
+    # 전 회차가 0인 날(19, 20)은 전부 마감
+    for d in ("2026-09-19", "2026-09-20"):
+        rounds = {k: s for k, s in by.items() if k[0] == d}
+        assert len(rounds) == 4
+        assert all(s.status == SlotStatus.FULL for s in rounds.values())
+
+    # day 단위 잡음 슬롯이 회차 슬롯과 함께 남아있지 않아야 함
+    assert ("2026-09-13", "day") not in by
