@@ -85,6 +85,34 @@ jobs:
           path: artifacts/inspect
           retention-days: 3
 
+      # 임시 진단 단계: 아티팩트 다운로드 없이 로그에서 바로 실제 마크업을 확인하기 위함. 원인 파악 후 제거 예정.
+      - name: Dump calendar cell debug info (temporary diagnostics)
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "::group::page_0.html (달력)"
+          HTML0=$(find artifacts/inspect -name 'page_0.html' | head -1)
+          [ -n "$HTML0" ] && python3 scripts/dump_calendar_cells.py "$HTML0" || echo "(page_0.html 없음)"
+          echo "::endgroup::"
+
+          echo "::group::slot_*.html 목록"
+          find artifacts/inspect -name 'slot_*.html' | sort
+          echo "::endgroup::"
+
+          for f in $(find artifacts/inspect -name 'slot_*.html' | sort | head -3); do
+            echo "::group::$f"
+            python3 scripts/dump_calendar_cells.py "$f"
+            echo "::endgroup::"
+          done
+
+          echo "::group::network.json"
+          find artifacts/inspect -name network.json -exec cat {} \;
+          echo "::endgroup::"
+
+          echo "::group::errors.txt"
+          find artifacts/inspect -name errors.txt -exec cat {} \;
+          echo "::endgroup::"
+
       - name: Restore previous state
         uses: actions/cache/restore@v4
         with:
