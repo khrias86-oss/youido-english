@@ -1,1 +1,36 @@
-ండి
+# umppa-monitor 배포 설정
+# 원래 요청의 예약 페이지(https://umppa.seoul.go.kr/icare/user/kidsCafeResve/BD_selectKidsCafeResveCal.do?q_fcltyId=YF260101)를 감시합니다.
+# ntfy 토픽은 비밀 값이 아니라 채널 식별자입니다. 휴대폰에 ntfy 앱을 설치한 뒤
+# 아래 topic 이름을 그대로 구독하면 빈자리 알림을 받을 수 있습니다.
+# 앱: https://ntfy.sh (iOS/Android 무료, 가입 불필요)
+
+targets:
+  - type: kidscafe
+    id: YF260101
+    name: 서울형 키즈카페 (YF260101)
+    months_ahead: 1
+    click_dates: true
+    weekdays: []
+    dates: []
+    sessions: []
+    min_remaining: 1
+
+notifiers:
+  - type: ntfy
+    topic: kidscafe-yf260101-105d2e8010fb
+  - type: console
+
+browser:
+  headless: true
+  timeout_ms: 30000
+
+schedule:
+  interval_sec: 600
+  jitter_sec: 30
+  quiet_hours: ["00:30-06:30"]
+  notify_on_close: false
+  renotify_after_min: 0
+
+state_dir: state
+artifacts_dir: artifacts
+log_level: INFO
