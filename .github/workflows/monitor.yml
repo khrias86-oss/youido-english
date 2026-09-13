@@ -1,0 +1,67 @@
+# 서울형 키즈카페 빈자리 감시 - GitHub Actions 호스팅 실행
+#
+# 주의:
+#  - GitHub 의 cron 은 최소 5분 간격이며 실제 실행은 수 분 지연될 수 있습니다.
+#    (정확한 주기가 필요하면 로컬 PC / 라즈베리파이 / 소형 VM 에서 `umppa-monitor run` 을 권장)
+#  - 알림 토큰은 저장소 Settings > Secrets and variables > Actions 에 등록하세요.
+#  - 저장소 변수(Variables) MONITOR_CONFIG_B64 에 config.yaml 을 base64 로 넣거나,
+#    저장소에 config.yaml 을 커밋해 두세요 (토큰은 ${ENV} 참조로만).
+name: kidscafe-vacancy-monitor
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"     # 10분마다 (UTC 기준)
+  workflow_dispatch: {}
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UMPPA_TELEGRAM_TOKEN: ${{ secrets.UMPPA_TELEGRAM_TOKEN }}
+      UMPPA_TELEGRAM_CHAT_ID: ${{ secrets.UMPPA_TELEGRAM_CHAT_ID }}
+      UMPPA_DISCORD_WEBHOOK: ${{ secrets.UMPPA_DISCORD_WEBHOOK }}
+      UMPPA_SLACK_WEBHOOK: ${{ secrets.UMPPA_SLACK_WEBHOOK }}
+      UMPPA_NTFY_TOPIC: ${{ secrets.UMPPA_NTFY_TOPIC }}
+      TZ: Asia/Seoul
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          pip install -e .
+          python -m playwright install --with-deps chromium
+
+      - name: Prepare config
+        run: |
+          if [ -n "${{ vars.MONITOR_CONFIG_B64 }}" ]; then
+            echo "${{ vars.MONITOR_CONFIG_B64 }}" | base64 -d > config.yaml
+          elif [ ! -f config.yaml ]; then
+            cp config.example.yaml config.yaml
+          fi
+
+      - name: Restore previous state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: monitor-state-${{ github.run_id }}
+          restore-keys: monitor-state-
+
+      - name: Run one check
+        run: umppa-monitor once -c config.yaml
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: monitor-state-${{ github.run_id }}

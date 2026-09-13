@@ -1,0 +1,31 @@
+<html><head><title>서울형 키즈카페 예약</title></head><body>
+<div class="cal_wrap">
+  <div class="cal_head"><a href="#" class="btn_prev" onclick="fn_month(-1)">이전달</a>
+    <strong class="cal_title">2026.09</strong>
+    <a href="#" class="btn_next" onclick="fn_month(1)">다음달</a></div>
+  <input type="hidden" name="q_resveYm" value="202609"/>
+  <table class="calendar">
+    <thead><tr><th>일</th><th>월</th><th>화</th><th>수</th><th>목</th><th>금</th><th>토</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="other"><span>30</span></td>
+        <td class="other"><span>31</span></td>
+        <td><em>1</em><p class="txt">휴관</p></td>
+        <td><em>2</em><a href="javascript:fn_day('20260902')">예약마감</a></td>
+        <td><em>3</em><a href="javascript:fn_day('20260903')">예약가능</a></td>
+        <td><em>4</em><ul><li><a href="#">1회차 10:00~12:00 잔여 0</a></li><li><a href="#">2회차 13:30~15:30 잔여 2</a></li></ul></td>
+        <td><em>5</em><ul><li>1회차 09:00~10:50 (3/20)</li><li>2회차 11:00~12:50 (20/20)</li></ul></td>
+      </tr>
+      <tr>
+        <td><em>6</em><span class="closed">예약불가</span></td>
+        <td><em>7</em></td>
+        <td data-date="2026-09-08"><em>8</em><a href="#">신청가능</a></td>
+        <td><em>9</em><button type="button" onclick="fn_day('20260909')">잔여 5명</button></td>
+        <td><em>10</em><span>정원마감</span></td>
+        <td><em>11</em><a href="#">예약가능</a></td>
+        <td><em>12</em><a href="#">예약가능</a></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+</body></html>
