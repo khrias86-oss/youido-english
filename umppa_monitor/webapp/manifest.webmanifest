@@ -1,0 +1,15 @@
+{
+  "name": "키즈카페 빈자리",
+  "short_name": "키즈카페",
+  "description": "서울형 키즈카페 빈자리를 달력으로 보고 감시할 날짜·회차를 고릅니다",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f6fa",
+  "theme_color": "#4c6ef5",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

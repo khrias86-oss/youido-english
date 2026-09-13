@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="키즈카페 빈자리">
+  <rect width="192" height="192" rx="42" fill="#4c6ef5"/>
+  <g fill="#fff">
+    <rect x="40" y="46" width="112" height="14" rx="7" opacity=".55"/>
+    <rect x="40" y="74" width="30" height="30" rx="8" opacity=".45"/>
+    <rect x="81" y="74" width="30" height="30" rx="8"/>
+    <rect x="122" y="74" width="30" height="30" rx="8" opacity=".45"/>
+    <rect x="40" y="115" width="30" height="30" rx="8"/>
+    <rect x="81" y="115" width="30" height="30" rx="8" opacity=".45"/>
+    <rect x="122" y="115" width="30" height="30" rx="8" opacity=".45"/>
+  </g>
+</svg>

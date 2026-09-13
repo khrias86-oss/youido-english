@@ -18,6 +18,7 @@ from .notify.base import Notifier
 from .notify.format import format_closed, format_opened
 from .scanner import apply_filters, is_notifiable, slots_from_result
 from .state import StateStore, compute_diff, next_snapshot
+from .webdata import save_webdata
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +47,9 @@ def in_quiet_hours(cfg: AppConfig, now: datetime | None = None) -> bool:
 
 def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
               session: BrowserSession, artifacts_dir: str | None = None) -> dict[str, list[Slot]]:
-    """모든 target 을 1회 감시하고 target_key -> 현재 슬롯 목록을 반환."""
+    """모든 target 을 1회 감시하고 target_key -> 필터를 거친 슬롯 목록을 반환."""
     out: dict[str, list[Slot]] = {}
+    unfiltered: dict[str, list[Slot]] = {}
     for target in cfg.targets:
         if not target.enabled:
             continue
@@ -61,6 +63,7 @@ def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
         all_slots = slots_from_result(result, cfg.parser)
         slots = apply_filters(all_slots, target)
         out[target.key] = slots
+        unfiltered[target.key] = all_slots
         open_cnt = sum(1 for s in slots if s.is_open)
         log.info("%s: parsed %d slots (%d after filter, %d open)", target.key, len(all_slots), len(slots), open_cnt)
         if not all_slots:
@@ -69,6 +72,9 @@ def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
         prev = store.load(target.key)
         diff = compute_diff(prev, slots)
         _notify(cfg, target, diff, prev.last_notified if prev else {}, notifiers, store, slots)
+    # 달력 화면은 '빈자리 없는 날'도 그려야 해서, 필터 이전의 전체 슬롯을 따로 남긴다.
+    if unfiltered:
+        save_webdata(cfg.state_dir, unfiltered)
     return out
 
 

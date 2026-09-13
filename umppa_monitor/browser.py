@@ -345,6 +345,21 @@ def fetch_program(session: BrowserSession, target: Target, overrides: ParserOver
     return result
 
 
+def fetch_program_list(session: BrowserSession, fclty_id: str = "") -> tuple[str, str]:
+    """프로그램 목록 페이지를 열어 (url, html) 반환. 웹 앱의 프로그램 선택지 수집용."""
+    from .models import BASE_URL, PROGRAM_LIST_PATH
+    url = f"{BASE_URL}{PROGRAM_LIST_PATH}"
+    if fclty_id:
+        url += f"?q_fcltyId={fclty_id}"
+    page = session.new_page()
+    try:
+        page.goto(url, wait_until="domcontentloaded")
+        _settle(page, 1000)
+        return page.url, page.content()
+    finally:
+        page.close()
+
+
 def fetch_target(session: BrowserSession, target: Target, overrides: ParserOverrides,
                  artifacts_dir: str | None = None) -> FetchResult:
     if target.kind == TargetKind.KIDSCAFE:

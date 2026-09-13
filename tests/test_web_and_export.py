@@ -33,11 +33,16 @@ def test_export_status(tmp_path, capsys):
     _seed_state(tmp_path)
     out = tmp_path / "site"
     assert main(["export-status", "-c", str(cfg), "--out", str(out), "--source-url", "https://example.com/x"]) == 0
+    # index.html 은 달력 웹앱 셸이고, 정적 자산이 함께 복사된다
     html = (out / "index.html").read_text(encoding="utf-8")
-    assert "여의도점" in html and "1건 가능" in html and "2회차 11:00~12:50" in html and "viewport" in html
+    assert "app.js" in html and "config.js" in html and "viewport" in html
+    for name in ("app.js", "style.css", "manifest.webmanifest", "icon.svg", ".nojekyll"):
+        assert (out / name).exists(), name
+    # 자바스크립트 없이 볼 수 있는 요약 페이지에는 기존 내용이 남아 있다
+    summary = (out / "summary.html").read_text(encoding="utf-8")
+    assert "여의도점" in summary and "1건 가능" in summary and "2회차 11:00~12:50" in summary
     data = json.loads((out / "status.json").read_text(encoding="utf-8"))
     assert data["targets"][0]["total"] == 2 and len(data["targets"][0]["open"]) == 1
-    assert (out / "manifest.webmanifest").exists() and (out / ".nojekyll").exists()
 
 
 def test_web_no_password(tmp_path):
