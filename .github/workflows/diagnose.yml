@@ -1,0 +1,96 @@
+# 진단 (수동 실행 전용)
+#
+# 실사이트 마크업을 로그로 바로 확인한다. 새 시설·프로그램을 추가했는데 파싱이
+# 이상할 때, 또는 "다음 달" 이동 같은 조작이 안 잡힐 때 쓴다. cron 없이 수동으로만
+# 돌아가므로 평소 비용은 0이다.
+#
+# 아티팩트 zip 대신 로그에 직접 출력하는 이유: 개발 환경의 네트워크 정책상
+# 아티팩트를 내려받지 못하는 경우가 있었다.
+name: kidscafe-diagnose
+
+on:
+  workflow_dispatch:
+    inputs:
+      months_ahead:
+        description: "달력을 몇 달 앞까지 넘겨볼지 (다음 달 버튼 탐색용)"
+        default: "1"
+      click_dates:
+        description: "날짜를 클릭해 회차 상세도 열어볼지 (true/false)"
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Seoul
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Playwright version
+        id: pw
+        run: echo "v=$(python -c 'import importlib.metadata as m;print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: .pw-browsers
+          key: pw-chromium-${{ runner.os }}-${{ steps.pw.outputs.v }}
+
+      - name: Install Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install chromium
+
+      - name: Install Chromium OS deps
+        run: python -m playwright install-deps chromium
+
+      - name: Prepare config
+        run: |
+          if [ -n "${{ vars.MONITOR_CONFIG_B64 }}" ]; then
+            echo "${{ vars.MONITOR_CONFIG_B64 }}" | base64 -d > config.yaml
+          elif [ ! -f config.yaml ]; then
+            cp config.example.yaml config.yaml
+          fi
+          # 진단 동안만 탐색 범위를 넓힌다 (저장소의 config.yaml 은 건드리지 않음)
+          python - <<'PY'
+          import os, yaml
+          cfg = yaml.safe_load(open("config.yaml", encoding="utf-8"))
+          for t in cfg.get("targets", []):
+              t["months_ahead"] = int(os.environ["MONTHS"])
+              t["click_dates"] = os.environ["CLICKS"] == "true"
+          yaml.safe_dump(cfg, open("config.yaml", "w", encoding="utf-8"), allow_unicode=True)
+          print("진단 설정:", cfg.get("targets"))
+          PY
+        env:
+          MONTHS: ${{ inputs.months_ahead }}
+          CLICKS: ${{ inputs.click_dates }}
+
+      - name: Inspect real site
+        run: umppa-monitor inspect -c config.yaml
+
+      - name: Dump calendar markup to log
+        run: |
+          for f in $(find artifacts/inspect -name 'page_*.html' | sort); do
+            echo "=============== $f ==============="
+            python scripts/dump_calendar_cells.py "$f" || true
+          done
+
+      - name: Dump program list markup to log
+        continue-on-error: true
+        run: |
+          umppa-monitor discover-programs -c config.yaml
+          echo "--- state/programs.json ---"
+          python -c "import json;print(json.dumps(json.load(open('state/programs.json'))['programs'],ensure_ascii=False,indent=1))"

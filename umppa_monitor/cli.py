@@ -231,9 +231,12 @@ def cmd_export_status(args) -> int:
     programs = _load_programs(cfg)
     (out / "data.json").write_text(
         json.dumps(build_snapshot(cfg, cfg.state_dir, prefs, programs), ensure_ascii=False), encoding="utf-8")
+    # liveDataUrl: 감시 루프가 10분마다 덮어쓰는 사본. Pages 재배포를 기다리지 않고
+    # 최신 현황을 보여주기 위해 앱이 이것을 먼저 읽고, 실패하면 dataUrl 로 되돌린다.
     (out / "config.js").write_text(
         "window.UMPPA_CONFIG=" + json.dumps(
-            {"dataUrl": "./data.json", "apiBase": args.api_base or "", "sourceUrl": args.source_url or ""},
+            {"dataUrl": "./data.json", "liveDataUrl": args.live_data_url or "",
+             "apiBase": args.api_base or "", "sourceUrl": args.source_url or ""},
             ensure_ascii=False) + ";\n", encoding="utf-8")
 
     # 3) 요약 페이지: 자바스크립트가 막힌 환경에서도 현황만은 보이도록 남겨 둔다
@@ -288,6 +291,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--source-url", default=None, help="페이지 하단에 표시할 저장소/Actions 링크")
     sp.add_argument("--api-base", default=None,
                     help="감시 조건 저장 API 주소 (예: https://<앱>.vercel.app). 비우면 조건을 브라우저에만 저장")
+    sp.add_argument("--live-data-url", default=None,
+                    help="감시 루프가 자주 갱신하는 data.json 주소. 앱이 이걸 먼저 읽는다")
     sp.set_defaults(func=cmd_export_status)
 
     sp = sub.add_parser("discover-programs", help="프로그램 목록 수집 (웹앱의 선택지)")
