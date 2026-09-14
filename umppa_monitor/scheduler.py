@@ -73,7 +73,10 @@ def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
             notes[target.key] = ("페이지는 열렸지만 회차 정보를 읽지 못했습니다. "
                                  "사이트 점검 중이거나 표기 방식이 바뀐 것일 수 있습니다.")
         elif result.errors:
-            notes[target.key] = f"일부 수집 실패: {'; '.join(result.errors)[:200]}"
+            # '다음 달 이동 버튼 없음' 은 이번 달만 보면 되는 상황이라 사용자에게 알릴 일이 아니다.
+            real = [e for e in result.errors if "next-month" not in e]
+            if real:
+                notes[target.key] = f"일부 수집 실패: {'; '.join(real)[:200]}"
 
         prev = store.load(target.key)
         diff = compute_diff(prev, slots)
