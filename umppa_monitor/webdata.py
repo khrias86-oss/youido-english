@@ -172,10 +172,12 @@ def prefs_from_config(cfg: AppConfig) -> Prefs:
 # --------------------------------------------------------------------------
 # 감시 결과 -> 달력용 스냅샷
 # --------------------------------------------------------------------------
-def save_webdata(state_dir: str | Path, results: dict[str, list[Slot]]) -> Path:
+def save_webdata(state_dir: str | Path, results: dict[str, list[Slot]],
+                 notes: dict[str, str] | None = None) -> Path:
     """필터 이전의 전체 슬롯을 달력용으로 누적 저장한다.
 
-    이번 사이클에서 확인하지 못한 대상(일시 오류 등)의 직전 값은 남겨 둔다.
+    이번 사이클에서 확인하지 못한 대상(일시 오류 등)의 직전 값은 남겨 두고,
+    대신 실패 이유(notes)를 함께 기록해 화면이 빈 채로 남지 않게 한다.
     """
     path = Path(state_dir) / WEBDATA_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,8 +190,15 @@ def save_webdata(state_dir: str | Path, results: dict[str, list[Slot]]) -> Path:
         except (json.JSONDecodeError, OSError):
             pass
     now = time.time()
+    notes = notes or {}
     for key, slots in results.items():
-        data["targets"][key] = {"checked_at": now, "slots": [s.to_dict() for s in slots]}
+        data["targets"][key] = {"checked_at": now, "slots": [s.to_dict() for s in slots],
+                                "error": notes.get(key, "")}
+    # 수집 자체가 실패해 results 에 없는 대상은 직전 슬롯을 유지하되 이유를 덧붙인다
+    for key, msg in notes.items():
+        if key not in results:
+            entry = data["targets"].setdefault(key, {"checked_at": None, "slots": []})
+            entry["error"] = msg
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -247,6 +256,7 @@ def build_target_view(target: Target, entry: dict[str, Any]) -> dict[str, Any]:
         "url": target.resolved_url(),
         "enabled": target.enabled,
         "checked_at": entry.get("checked_at"),
+        "error": entry.get("error") or "",
         "sessions": sessions,
         "days": days,
         "undated": [{"session": s.session, "status": s.status.value, "remaining": s.remaining}

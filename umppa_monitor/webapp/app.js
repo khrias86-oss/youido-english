@@ -7,10 +7,12 @@
 (() => {
   'use strict';
 
-  const CFG = Object.assign({ dataUrl: './data.json', apiBase: '', sourceUrl: '' }, window.UMPPA_CONFIG || {});
+  const CFG = Object.assign({ dataUrl: './data.json', liveDataUrl: '', apiBase: '', sourceUrl: '' },
+                            window.UMPPA_CONFIG || {});
   const WD = ['월', '화', '수', '목', '금', '토', '일'];
   const LS_PREFS = 'umppa.prefs.v1';
   const LS_PIN = 'umppa.pin.v1';
+  const LS_CACHE = 'umppa.data.v1';
 
   let DATA = null;
   let prefs = null;
@@ -18,6 +20,7 @@
   let activeKey = null;
   let viewMonth = '';
   let selDate = null;
+  let fromCache = false;      // 네트워크가 안 될 때 마지막으로 본 현황을 띄웠는지
 
   // ---------------------------------------------------------------- helpers
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -78,24 +81,46 @@
   const activeTarget = () => (DATA.targets || []).find((t) => t.key === activeKey) || null;
 
   // ------------------------------------------------------------------ 로드
+  async function fetchJson(url) {
+    const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function cacheData(data) {
+    try { localStorage.setItem(LS_CACHE, JSON.stringify(data)); } catch (_) { /* 용량 초과 등 */ }
+  }
+  function readCache() {
+    try { return JSON.parse(localStorage.getItem(LS_CACHE) || 'null'); } catch (_) { return null; }
+  }
+
+  /** 감시 루프가 자주 갱신하는 사본을 먼저, 실패하면 함께 배포된 사본을 읽는다. */
   async function load() {
     const icon = $('#reload');
     icon.classList.add('spin');
-    try {
-      const res = await fetch(`${CFG.dataUrl}${CFG.dataUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      DATA = await res.json();
-    } catch (e) {
-      $('#main').innerHTML = '';
-      const c = el('div', 'card');
-      c.appendChild(el('h2', null, '현황을 불러오지 못했습니다'));
-      c.appendChild(el('p', 'card-sub', String(e.message || e)));
-      c.appendChild(btn('btn block', '다시 시도', load));
-      $('#main').appendChild(c);
-      return;
-    } finally {
-      icon.classList.remove('spin');
+    const sources = [CFG.liveDataUrl, CFG.dataUrl].filter(Boolean);
+    const failures = [];
+    let data = null;
+    for (const src of sources) {
+      try {
+        const d = await fetchJson(src);
+        if (d && Array.isArray(d.targets)) { data = d; break; }
+        failures.push(`${src} → 형식이 예상과 다릅니다`);
+      } catch (e) {
+        failures.push(`${src} → ${e.message || e}`);
+      }
     }
+    icon.classList.remove('spin');
+
+    fromCache = false;
+    if (data) {
+      cacheData(data);
+    } else {
+      data = readCache();
+      fromCache = !!data;
+    }
+    if (!data) { renderLoadError(failures); return; }
+    DATA = data;
 
     prefs = adoptPrefs(DATA.prefs);
     savedJson = JSON.stringify(prefs);
@@ -137,19 +162,25 @@
     if (!DATA) return;
 
     $('#freshness').textContent = freshnessText();
+    for (const b of banners()) main.appendChild(b);
     main.appendChild(renderTabs());
 
     const t = activeTarget();
     if (!t) {
       main.appendChild(card('감시 대상이 없습니다', '아래에서 프로그램을 고르거나 config.yaml 에 대상을 추가하세요.'));
-    } else if (t.kind === 'kidscafe') {
-      main.appendChild(renderCalendar(t));
-      main.appendChild(renderWeekdaySummary(t));
-      if (selDate) main.appendChild(renderDay(t));
-      main.appendChild(renderPrefs(t));
     } else {
-      main.appendChild(renderProgramTarget(t));
+      if (t.error) main.appendChild(targetErrorCard(t));
+      if (!t.total) {
+        if (!t.error) main.appendChild(targetEmptyCard(t));
+      } else if (t.kind === 'kidscafe') {
+        main.appendChild(renderCalendar(t));
+        main.appendChild(renderWeekdaySummary(t));
+        if (selDate) main.appendChild(renderDay(t));
+      } else {
+        main.appendChild(renderProgramTarget(t));
+      }
       main.appendChild(renderPrefs(t));
+      if (!CFG.apiBase) main.appendChild(renderApplyHelp());
     }
     if ((DATA.programs || []).length) main.appendChild(renderProgramPicker());
     main.appendChild(renderFooter());
@@ -159,13 +190,117 @@
   function freshnessText() {
     const ts = Math.max(0, ...(DATA.targets || []).map((t) => t.checked_at || 0));
     const every = Math.round((DATA.interval_sec || 600) / 60);
-    return `${since(ts)} · ${every}분마다 확인`;
+    return (fromCache ? '저장된 현황 · ' : '') + `${since(ts)} · ${every}분마다 확인`;
+  }
+
+  /** sourceUrl 에서 저장소를 추출해 prefs.json 편집 화면 주소를 만든다. */
+  function repoEditUrl() {
+    const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)/.exec(CFG.sourceUrl || '');
+    return m ? `https://github.com/${m[1]}/${m[2]}/edit/main/webstate/prefs.json` : '';
+  }
+
+  /** 저장 API 가 없을 때, 고른 조건을 알림에도 반영하는 우회 경로를 안내한다. */
+  function renderApplyHelp() {
+    const c = card('고른 조건을 알림에도 반영하기',
+      '지금은 조건이 이 브라우저에만 저장됩니다. 아래 두 단계면 다음 확인부터 알림에도 적용됩니다.');
+    const ol = el('ol', 'note');
+    ol.style.paddingLeft = '20px';
+    ol.style.margin = '0 0 12px';
+    ol.appendChild(el('li', null, '"조건 복사"를 누릅니다.'));
+    ol.appendChild(el('li', null, '"조건 파일 열기"에서 내용을 모두 지우고 붙여넣은 뒤 Commit changes 를 누릅니다.'));
+    c.appendChild(ol);
+
+    const row = el('div', 'row-actions');
+    const copy = btn('btn ghost', '조건 복사', async () => {
+      const payload = JSON.stringify(Object.assign({}, prefs, { updated_at: Date.now() / 1000 }), null, 1);
+      try {
+        await navigator.clipboard.writeText(payload);
+        copy.textContent = '복사됨';
+        setTimeout(() => { copy.textContent = '조건 복사'; }, 1500);
+      } catch (_) {
+        // 클립보드가 막힌 브라우저: 직접 고를 수 있게 펼쳐서 보여준다
+        const pre = el('pre', null, payload);
+        c.appendChild(pre);
+        copy.textContent = '아래 내용을 복사하세요';
+      }
+    });
+    row.appendChild(copy);
+    const edit = repoEditUrl();
+    if (edit) {
+      const a = el('a', 'btn ghost', '조건 파일 열기');
+      a.href = edit; a.target = '_blank'; a.rel = 'noopener';
+      row.appendChild(a);
+    }
+    c.appendChild(row);
+    return c;
   }
 
   function card(title, sub) {
     const c = el('div', 'card');
     if (title) c.appendChild(el('h2', null, title));
     if (sub) c.appendChild(el('p', 'card-sub', sub));
+    return c;
+  }
+
+  /** 화면 맨 위에 붙는 상태 경고: 오프라인 사본 / 오래된 데이터. */
+  function banners() {
+    const out = [];
+    if (fromCache) {
+      out.push(banner('warn', '지금은 인터넷에 연결되지 않아 마지막으로 받은 현황을 보여줍니다. '
+        + '실제 빈자리는 달라졌을 수 있습니다.'));
+    }
+    const ts = Math.max(0, ...(DATA.targets || []).map((t) => t.checked_at || 0));
+    const limit = (DATA.interval_sec || 600) * 3;
+    if (!fromCache && ts && (Date.now() / 1000 - ts) > limit) {
+      out.push(banner('warn', `마지막 확인이 ${since(ts)}입니다. 감시가 밀리고 있어 화면이 실제보다 오래된 상태일 수 있습니다.`));
+    }
+    return out;
+  }
+
+  function banner(kind, text) {
+    const b = el('div', `banner ${kind}`, text);
+    b.setAttribute('role', 'status');
+    return b;
+  }
+
+  /** 어떤 경로로도 데이터를 못 받았을 때. 이유와 다음 행동을 같이 보여준다. */
+  function renderLoadError(failures) {
+    const main = $('#main');
+    main.innerHTML = '';
+    $('#freshness').textContent = '현황을 불러오지 못했습니다';
+    const c = card('현황을 불러오지 못했습니다',
+      '인터넷 연결을 확인해 주세요. 연결에 문제가 없다면 감시가 아직 한 번도 돌지 않았을 수 있습니다.');
+    if (failures.length) {
+      const d = el('details');
+      d.appendChild(el('summary', 'note', '자세한 원인'));
+      const pre = el('pre', null, failures.join('\n'));
+      d.appendChild(pre);
+      c.appendChild(d);
+    }
+    c.appendChild(btn('btn block', '다시 시도', load));
+    main.appendChild(c);
+  }
+
+  function targetErrorCard(t) {
+    const c = card(`${t.name || t.key} 확인 실패`, t.error);
+    const sub = el('p', 'note', t.total
+      ? '아래 현황은 마지막으로 성공했던 확인 결과입니다.'
+      : '예약 페이지를 직접 열어 확인해 주세요.');
+    c.appendChild(sub);
+    const link = el('a', 'btn ghost block', '예약 페이지 열기');
+    link.href = t.url; link.target = '_blank'; link.rel = 'noopener';
+    link.style.marginTop = '10px';
+    c.appendChild(link);
+    return c;
+  }
+
+  function targetEmptyCard(t) {
+    const c = card(`${t.name || t.key}`, t.checked_at
+      ? '확인은 됐지만 이 시설의 회차 정보가 아직 올라오지 않았습니다.'
+      : '아직 한 번도 확인하지 않았습니다. 첫 감시가 돌면 여기에 달력이 나타납니다.');
+    const link = el('a', 'btn ghost block', '예약 페이지 열기');
+    link.href = t.url; link.target = '_blank'; link.rel = 'noopener';
+    c.appendChild(link);
     return c;
   }
 
@@ -258,6 +393,7 @@
     for (const k of ['h1', 'h2', 'h3', 'h4']) {
       const i = el('i');
       i.style.background = `var(--${k}-bg)`;
+      i.setAttribute('aria-hidden', 'true');   // 색 견본은 장식. 뜻은 좌우 텍스트가 전달한다
       lg.appendChild(i);
     }
     lg.appendChild(el('span', null, '많음 · 숫자는 잔여 인원'));
@@ -527,6 +663,9 @@
   }
 
   // ------------------------------------------------------------------ 시작
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
   $('#reload').addEventListener('click', load);
   $('#save').addEventListener('click', save);
   document.addEventListener('visibilitychange', () => {

@@ -145,7 +145,22 @@ Windows 는 작업 스케줄러에 `umppa-monitor once` 를 5분 주기로 등�
 | **GitHub Pages 만** | 브라우저(localStorage) | 화면 필터로는 즉시 동작. 알림까지 반영되지는 않음 |
 | **+ Vercel API** | 저장소 `webstate/prefs.json` | 웹에서 고른 조건이 다음 감시부터 알림에 그대로 적용 |
 
-### 5-1. Vercel 에 배포해 조건까지 반영하기
+### 5-1. 알림 주기 — cron 을 믿으면 안 됩니다
+
+`monitor.yml` 의 cron 은 `*/10`(10분)이지만, **GitHub 는 활동이 적은 저장소의 `schedule` 이벤트를 크게 지연·생략합니다.** 실측하니 10분이 아니라 약 2시간 간격으로 실행됐습니다(run #8~#13). cron 을 더 촘촘히 적어도 같은 제약을 받습니다.
+
+그래서 감시는 **`watch.yml`** 이 담당합니다. 작업 하나가 5시간 35분 동안 살아 있으면서 **내부 루프로 10분마다** 확인하므로, schedule 지연과 무관하게 실제 확인 간격이 유지됩니다. 6시간 cron 이 다음 작업을 띄워 앞 작업을 이어받고, `monitor.yml` 은 백스톱으로 남습니다. 공개 저장소는 Actions 분수가 무제한이라 비용은 늘지 않습니다.
+
+```
+watch.yml    (6시간마다 시작 → 5h35m 동안 10분 주기 확인)  ← 알림은 이쪽이 담당
+  └─ 매 확인마다 data.json 을 webdata 브랜치에 올림        ← 앱이 먼저 읽는 최신 사본
+monitor.yml  (cron, 지연 가능)                             ← 백스톱 + GitHub Pages 게시
+diagnose.yml (수동 실행 전용)                              ← 실사이트 마크업 확인
+```
+
+비공개 저장소로 바꾸면 Actions 분수(월 2,000분)를 쓰므로 `watch.yml` 을 끄고 `monitor.yml` 만 남기세요.
+
+### 5-2. Vercel 에 배포해 조건까지 반영하기
 
 1. [vercel.com](https://vercel.com) → **Add New → Project** → 이 저장소 import (`vercel.json` 이 빌드를 알아서 처리)
 2. 프로젝트 **Settings → Environment Variables** 에 등록
@@ -157,9 +172,13 @@ Windows 는 작업 스케줄러에 `umppa-monitor once` 를 5분 주기로 등�
 3. 저장소 **Settings → Secrets and variables → Actions → Variables** 에 `WEB_API_BASE` = 배포된 주소(`https://<앱>.vercel.app`) 등록
 4. 다음 감시 실행부터 Pages 의 앱이 이 API 로 조건을 저장합니다
 
-배포된 앱은 빈자리 데이터를 GitHub Pages 의 `data.json` 에서 읽습니다. 감시 자체는 GitHub Actions 에 남겨 두어 무료 인스턴스가 잠들 걱정이 없습니다.
+> **`403 forbidden: You don't have permission to create a project`** 이 나오면, 연결된 Vercel 신원에 프로젝트 생성 권한이 없는 상태입니다. 개인 계정으로 직접 로그인해 import 하거나, 팀 소속이라면 Owner 에게 권한을 요청하세요.
 
-### 5-2. 다른 호스팅
+**Vercel 없이도 조건을 반영할 수 있습니다.** 저장 API 가 설정되지 않으면 앱이 "고른 조건을 알림에도 반영하기" 카드를 띄웁니다. `조건 복사` → `조건 파일 열기`(`webstate/prefs.json` 편집 화면) → 붙여넣고 Commit 하면 다음 확인부터 적용됩니다.
+
+배포된 앱은 빈자리 데이터를 `webdata` 브랜치의 `data.json` 에서 먼저 읽고, 실패하면 GitHub Pages 사본으로 되돌립니다. 감시 자체는 GitHub Actions 에 남겨 두어 무료 인스턴스가 잠들 걱정이 없습니다.
+
+### 5-3. 다른 호스팅
 
 자세한 절차는 **[docs/DEPLOY.md](docs/DEPLOY.md)** 를 보세요.
 
@@ -216,7 +235,9 @@ python -m pytest -q
 umppa_monitor/
   cli.py            명령어 (run / once / serve / export-status / discover-programs /
                     inspect / parse-file / test-notify / login / show-state)
-  webapp/           달력 웹 앱 (index.html, app.js, style.css, manifest, icon) — 정적, 빌드 불필요
+  webapp/           달력 웹 앱 (index.html, app.js, style.css, sw.js, manifest, icon) — 정적, 빌드 불필요
+                    sw.js 는 화면 파일만 캐시한다. 현황은 캐시하지 않고 앱이 마지막 값을
+                    "저장된 현황"이라고 밝혀 보여주므로 오래된 값을 새 것처럼 띄우지 않는다
   webdata.py        웹 앱이 읽는 data.json 생성 + 웹에서 고른 감시 조건(prefs) 적용
   web.py            관리자용 폼 대시보드 (FastAPI), service.py 백그라운드 감시, config_store.py 설정 편집
   render_html.py    대시보드·요약 페이지 HTML

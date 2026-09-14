@@ -105,7 +105,8 @@ jobs:
         run: |
           umppa-monitor export-status -c config.yaml --out site \
             --source-url "${{ github.server_url }}/${{ github.repository }}/actions/workflows/monitor.yml" \
-            --api-base "${{ vars.WEB_API_BASE }}"
+            --api-base "${{ vars.WEB_API_BASE }}" \
+            --live-data-url "https://raw.githubusercontent.com/${{ github.repository }}/webdata/data.json"
 
       - name: Upload Pages artifact
         if: always()

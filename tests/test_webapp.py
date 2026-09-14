@@ -65,6 +65,26 @@ def test_save_webdata_keeps_targets_not_seen_this_cycle(tmp_path):
     assert len(data["targets"][KEY]["slots"]) == 5
 
 
+def test_webdata_records_failure_reason(tmp_path):
+    """화면이 빈 채로 남지 않도록 실패 이유가 대상별로 실린다."""
+    cfg = load_config(_cfg(tmp_path))
+    save_webdata(tmp_path / "state", {KEY: _slots()}, {KEY: "회차 정보를 읽지 못했습니다"})
+    snap = build_snapshot(cfg, tmp_path / "state", None)
+    assert snap["targets"][0]["error"] == "회차 정보를 읽지 못했습니다"
+    # 이유가 없으면 빈 문자열 (앱에서 falsy 로 다룬다)
+    save_webdata(tmp_path / "state", {KEY: _slots()})
+    assert build_snapshot(cfg, tmp_path / "state", None)["targets"][0]["error"] == ""
+
+
+def test_webdata_keeps_last_slots_when_fetch_fails(tmp_path):
+    """수집이 아예 실패한 대상은 직전 현황을 유지하고 이유만 덧붙인다."""
+    save_webdata(tmp_path, {KEY: _slots()})
+    save_webdata(tmp_path, {}, {KEY: "예약 페이지를 열지 못했습니다 (TimeoutError)"})
+    entry = json.loads((tmp_path / "webdata.json").read_text(encoding="utf-8"))["targets"][KEY]
+    assert len(entry["slots"]) == 5                      # 직전 슬롯 보존
+    assert "열지 못했습니다" in entry["error"]
+
+
 def test_build_snapshot_shape(tmp_path):
     cfg = load_config(_cfg(tmp_path))
     save_webdata(tmp_path / "state", {KEY: _slots()})
@@ -137,6 +157,19 @@ def test_export_uses_saved_prefs(tmp_path):
     assert set(data["targets"][0]["days"]) == {"2026-09-15", "2026-09-19", "2026-10-02"}
     conf = (out / "config.js").read_text(encoding="utf-8")
     assert "https://x.vercel.app" in conf and "./data.json" in conf
+
+
+def test_export_includes_live_data_url_and_offline_assets(tmp_path):
+    """앱은 자주 갱신되는 사본을 먼저 읽고, 오프라인용 서비스워커도 함께 배포된다."""
+    cfg = _cfg(tmp_path)
+    save_webdata(tmp_path / "state", {KEY: _slots()})
+    out = tmp_path / "site"
+    live = "https://raw.githubusercontent.com/o/r/webdata/data.json"
+    assert main(["export-status", "-c", str(cfg), "--out", str(out), "--live-data-url", live]) == 0
+    conf = json.loads((out / "config.js").read_text(encoding="utf-8")
+                      .removeprefix("window.UMPPA_CONFIG=").rstrip().rstrip(";"))
+    assert conf["liveDataUrl"] == live and conf["dataUrl"] == "./data.json"
+    assert (out / "sw.js").exists()
 
 
 # --------------------------------------------------------- 프로그램 목록 파서

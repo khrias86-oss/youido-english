@@ -41,6 +41,32 @@ def main() -> None:
                 for a in c.find_all(["a", "button"])]
         print(f"[{i}] class={cls} onclick={onclick!r} text={txt!r} links={links}")
 
+    # 달력을 다음 달로 넘기는 조작이 무엇인지 (months_ahead > 0 을 쓰려면 필요)
+    print("\n--- 월 이동 후보: 모든 a/button/input 의 텍스트·속성 ---")
+    for el in soup.find_all(["a", "button", "input"]):
+        txt = normalize_ws(el.get_text(" ")) or normalize_ws(str(el.get("value") or ""))
+        attrs = {k: v for k, v in el.attrs.items()
+                 if k in ("class", "id", "name", "onclick", "href", "title", "aria-label", "value")}
+        if len(txt) > 40:
+            continue
+        blob = f"{txt} {attrs}".lower()
+        if any(k in blob for k in ("next", "prev", "다음", "이전", "month", "달", "ym", "▶", "◀", ">", "<")):
+            print(f"<{el.name}> text={txt!r} {attrs}")
+
+    print("\n--- 연/월을 담은 것으로 보이는 input (hidden 포함) ---")
+    for inp in soup.find_all("input"):
+        name = (inp.get("name") or inp.get("id") or "")
+        if any(k in name.lower() for k in ("ym", "month", "year", "de", "dt", "date")):
+            print(f"<input name={name!r} value={inp.get('value')!r} type={inp.get('type')!r}>")
+
+    print("\n--- 달력 갱신에 쓰일 만한 script 함수 이름 ---")
+    import re as _re
+    names = set()
+    for sc in soup.find_all("script"):
+        for m in _re.finditer(r"function\s+(\w*(?:[Mm]onth|[Cc]al|[Pp]rev|[Nn]ext|[Mm]ove)\w*)\s*\(", sc.get_text()):
+            names.add(m.group(1))
+    print(sorted(names) or "(없음)")
+
     # 회차/시간/잔여로 보이는 하위 요소도 넓게 훑는다
     print("\n--- elements mentioning 예약/회차/잔여/마감/가능 (최대 60개) ---")
     kws = ("예약", "회차", "잔여", "마감", "가능", "불가", "휴관", "신청", "정원")

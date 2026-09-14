@@ -1,6 +1,9 @@
 name: ci
 on:
   push:
+    # webdata 는 감시 결과(data.json)만 담는 데이터 브랜치다. 10분마다 갱신되므로
+    # 테스트를 돌릴 이유가 없다.
+    branches-ignore: ["webdata"]
   pull_request:
 jobs:
   test:

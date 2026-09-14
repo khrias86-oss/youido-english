@@ -1,0 +1,134 @@
+# 상시 감시 (빠른 알림용)
+#
+# 왜 이 워크플로가 따로 있나:
+#   monitor.yml 은 cron "*/10" 이지만, GitHub 는 활동이 적은 저장소의 schedule
+#   이벤트를 크게 지연·생략한다. 실측 결과 10분이 아니라 약 2시간 간격으로 실행됐다
+#   (run #8~#13). 취소표를 잡으려면 이 간격으로는 늦다.
+#
+#   그래서 "cron 을 더 자주" 대신 "한 번 켜서 오래 도는" 방식을 쓴다. 작업 하나가
+#   5시간 40분 동안 살아 있으면서 내부 루프로 10분마다 확인하므로, schedule 지연과
+#   무관하게 실제 확인 간격이 10분으로 유지된다. 공개 저장소라 Actions 분수는
+#   무제한이므로 비용도 들지 않는다.
+#
+#   6시간 cron 이 다음 작업을 띄워 앞 작업이 끝나는 지점을 이어받는다. 6시간 주기는
+#   10분 주기와 달리 지연이 크지 않고, 지연되더라도 monitor.yml 이 백스톱으로 남는다.
+#
+# 빈자리 데이터는 매 확인마다 webdata 브랜치의 data.json 으로 올려 웹앱이 바로
+# 읽게 한다(GitHub Pages 재배포를 기다리지 않아도 됨).
+name: kidscafe-watch
+
+on:
+  schedule:
+    - cron: "5 */6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: kidscafe-watch
+  cancel-in-progress: false      # 앞 작업이 끝날 때까지 기다렸다가 이어받는다
+
+permissions:
+  contents: write                # webdata 브랜치에 data.json 푸시
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350         # 작업 상한 360분보다 짧게
+    env:
+      UMPPA_TELEGRAM_TOKEN: ${{ secrets.UMPPA_TELEGRAM_TOKEN }}
+      UMPPA_TELEGRAM_CHAT_ID: ${{ secrets.UMPPA_TELEGRAM_CHAT_ID }}
+      UMPPA_DISCORD_WEBHOOK: ${{ secrets.UMPPA_DISCORD_WEBHOOK }}
+      UMPPA_SLACK_WEBHOOK: ${{ secrets.UMPPA_SLACK_WEBHOOK }}
+      UMPPA_NTFY_TOPIC: ${{ secrets.UMPPA_NTFY_TOPIC }}
+      TZ: Asia/Seoul
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Playwright version
+        id: pw
+        run: echo "v=$(python -c 'import importlib.metadata as m;print(m.version("playwright"))')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: .pw-browsers
+          key: pw-chromium-${{ runner.os }}-${{ steps.pw.outputs.v }}
+
+      - name: Install Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install chromium
+
+      - name: Install Chromium OS deps
+        run: python -m playwright install-deps chromium
+
+      - name: Prepare config
+        run: |
+          if [ -n "${{ vars.MONITOR_CONFIG_B64 }}" ]; then
+            echo "${{ vars.MONITOR_CONFIG_B64 }}" | base64 -d > config.yaml
+          elif [ ! -f config.yaml ]; then
+            cp config.example.yaml config.yaml
+          fi
+
+      - name: Restore previous state
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: monitor-state-${{ github.run_id }}
+          restore-keys: monitor-state-
+
+      - name: Discover programs
+        continue-on-error: true
+        run: umppa-monitor discover-programs -c config.yaml
+
+      # 데이터를 올릴 webdata 브랜치용 별도 작업 폴더. 저장소 본체는 건드리지 않는다.
+      - name: Prepare data branch checkout
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p /tmp/webdata && cd /tmp/webdata
+          git init -q
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+
+      - name: Watch loop
+        run: |
+          set -u
+          INTERVAL=600
+          END=$(( $(date +%s) + 20100 ))   # 5시간 35분: timeout(350분)보다 여유를 둔다
+          N=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            N=$((N + 1))
+            echo "::group::확인 #$N ($(date '+%H:%M:%S'))"
+            umppa-monitor once -c config.yaml || echo "확인 실패 - 다음 주기에 재시도"
+            umppa-monitor export-status -c config.yaml --out site \
+              --source-url "${{ github.server_url }}/${{ github.repository }}/actions/workflows/watch.yml" \
+              --api-base "${{ vars.WEB_API_BASE }}" || true
+            # 웹앱이 바로 읽을 수 있도록 data.json 만 webdata 브랜치에 덮어쓴다
+            if [ -f site/data.json ]; then
+              cp site/data.json /tmp/webdata/data.json
+              ( cd /tmp/webdata \
+                && git add data.json \
+                && git commit -q -m "빈자리 현황 갱신 $(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+                && git push -q -f origin HEAD:webdata ) || echo "data.json 푸시 실패 - 화면은 Pages 사본으로 대체"
+            fi
+            echo "::endgroup::"
+            # 남은 시간이 한 주기보다 적으면 더 자지 않고 끝낸다 (다음 작업이 이어받는다)
+            [ $(( $(date +%s) + INTERVAL )) -lt "$END" ] || break
+            sleep "$INTERVAL"
+          done
+          echo "총 $N 회 확인 후 종료. 다음 작업이 이어받습니다."
+
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: monitor-state-${{ github.run_id }}

@@ -50,6 +50,7 @@ def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
     """모든 target 을 1회 감시하고 target_key -> 필터를 거친 슬롯 목록을 반환."""
     out: dict[str, list[Slot]] = {}
     unfiltered: dict[str, list[Slot]] = {}
+    notes: dict[str, str] = {}      # 화면에 이유를 보여주기 위한 대상별 실패 메모
     for target in cfg.targets:
         if not target.enabled:
             continue
@@ -57,6 +58,7 @@ def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
             result = fetch_target(session, target, cfg.parser, artifacts_dir)
         except Exception as e:
             log.error("fetch failed for %s: %s", target.key, e)
+            notes[target.key] = f"예약 페이지를 열지 못했습니다 ({type(e).__name__})"
             continue
         if result.errors:
             log.warning("%s fetch warnings: %s", target.key, "; ".join(result.errors)[:500])
@@ -68,13 +70,20 @@ def scan_once(cfg: AppConfig, store: StateStore, notifiers: list[Notifier],
         log.info("%s: parsed %d slots (%d after filter, %d open)", target.key, len(all_slots), len(slots), open_cnt)
         if not all_slots:
             log.warning("%s: 슬롯을 하나도 파싱하지 못했습니다. `umppa-monitor inspect` 로 페이지 구조를 확인하세요.", target.key)
+            notes[target.key] = ("페이지는 열렸지만 회차 정보를 읽지 못했습니다. "
+                                 "사이트 점검 중이거나 표기 방식이 바뀐 것일 수 있습니다.")
+        elif result.errors:
+            # '다음 달 이동 버튼 없음' 은 이번 달만 보면 되는 상황이라 사용자에게 알릴 일이 아니다.
+            real = [e for e in result.errors if "next-month" not in e]
+            if real:
+                notes[target.key] = f"일부 수집 실패: {'; '.join(real)[:200]}"
 
         prev = store.load(target.key)
         diff = compute_diff(prev, slots)
         _notify(cfg, target, diff, prev.last_notified if prev else {}, notifiers, store, slots)
     # 달력 화면은 '빈자리 없는 날'도 그려야 해서, 필터 이전의 전체 슬롯을 따로 남긴다.
-    if unfiltered:
-        save_webdata(cfg.state_dir, unfiltered)
+    if unfiltered or notes:
+        save_webdata(cfg.state_dir, unfiltered, notes)
     return out
 
 
